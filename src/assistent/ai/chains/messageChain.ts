@@ -23,7 +23,7 @@ export class MessageChain extends BaseChain {
       };
     }
     return {
-      response: `_Admirer_:  \n\n _${message}_ `,
+      response: `_Admirer_:  \n\n _${message}_  \n\n\n Acesse abaixo para enviar mensagens anônimas também:\n catchat.com.br`,
       intent: 'MESSAGE',
     };
   }

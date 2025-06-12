@@ -138,6 +138,7 @@ private async salvaUsuario(userData: UserDataDto): Promise<User> {
     mensagem: Message,
   ): QrCodeResponseDto {
     return {
+      //id_compra: payment.id_compra,  //apenas para teste, não enviar na vida real
       id_mensagem: mensagem.id_mensagem,
       brCode: payment.qrCode,
       brCodeBase64: payment.qrCodeUrl,

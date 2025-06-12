@@ -46,6 +46,7 @@ export class PayloadDto {
 
 export class QrCodeResponseDto {
   id_mensagem: string;
+  //id_compra: string
   brCode: string;
   brCodeBase64: string;
 }
