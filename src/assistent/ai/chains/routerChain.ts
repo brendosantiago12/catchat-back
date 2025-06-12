@@ -6,6 +6,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { LLMChain } from 'langchain/chains';
 import { PromptTemplate } from '@langchain/core/prompts';
 import { ConversationService } from '../../conversation/conversation.service';
+import { AlertOfSendChain } from './alertOfSendChain';
 
 // Responda apenas com 'WELCOME' se o usuário está iniciando a conversa e deve receber uma mensagem de boas-vindas.
 
@@ -25,6 +26,7 @@ export class RouterChain extends BaseChain {
   private generalChain: GeneralChain;
   private messageChain: MessageChain;
   private welcomeChain: WelcomeChain;
+  private alertOfSendChain: AlertOfSendChain;
   private llmChain: LLMChain;
 
   constructor(model: ChatOpenAI, conversationService: ConversationService) {
@@ -32,6 +34,7 @@ export class RouterChain extends BaseChain {
     this.generalChain = new GeneralChain(model);
     this.messageChain = new MessageChain(conversationService);
     this.welcomeChain = new WelcomeChain(conversationService);
+    this.alertOfSendChain = new AlertOfSendChain(conversationService);
     const prompt = new PromptTemplate({
       template: routerSystemPrompt,
       inputVariables: ['input', 'history'],
@@ -54,6 +57,13 @@ export class RouterChain extends BaseChain {
 
     if (values.input.trim().toLowerCase() === 'boas vindas') {
       return this.welcomeChain.call({
+        input: '',
+        userId: values.userId,
+      });
+    }
+
+    if (values.input.trim().toLowerCase() === 'alerta de envio') {
+      return this.alertOfSendChain.call({
         input: '',
         userId: values.userId,
       });

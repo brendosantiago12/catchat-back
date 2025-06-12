@@ -41,9 +41,14 @@ export class SendMessageService {
       recipientPhone: this.formatPhoneNumber(dto.recipientPhone),
     });
     // Chama o AI
-    return this.aiService.processMessage(
+    await this.aiService.processMessage(
       this.formatPhoneNumber(dto.recipientPhone),
       'boas vindas',
+    );
+
+    return this.aiService.processMessage(
+      this.formatPhoneNumber(dto.senderPhone),
+      'alerta de envio',
     );
   }
 
