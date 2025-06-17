@@ -28,7 +28,7 @@ export class MessageChain extends BaseChain {
     await this.conversationService.updateSecretMessageStatus(values.userId)
 
     return {
-      response: `_Admirer_:  \n\n${messagesString}\n\n Acesse abaixo para enviar mensagens anônimas também:\n catchat.com.br`,
+      response: `_Admirer_:  \n\n${messagesString}\n\n Acesse abaixo para enviar mensagens anônimas também:\ncatchat.com.br`,
       intent: 'MESSAGE',
     };
   }
