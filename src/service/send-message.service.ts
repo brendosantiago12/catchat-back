@@ -52,7 +52,7 @@ export class SendMessageService {
 
     console.log('enviando resposta pra o remetente')
     this.whatsApp.sendMessage(this.formatPhoneNumber(dto.senderPhone), 
-      `Olá ${dto.senderName}, sua mensagem foi encaminhada!! \n\nClick abaixo e continue enviando mensagens:\ncatchat.com.br `);
+      `Olá ${dto.senderName}, sua mensagem foi encaminhada!! \n\nClick abaixo e continue enviando mensagens:\ncatchat.com.br/FormPage `);
   }
 
   private formatPhoneNumber(phone: string): string {
