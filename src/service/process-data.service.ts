@@ -9,6 +9,8 @@ import {
   FormDataDto,
 } from '../dto/dto';
 import { PagarmeService } from './pagarme.service';
+import { SendMessageService } from './send-message.service';
+import { SendMessageDto } from 'src/dto/send-message.dto';
 
 @Injectable()
 export class ProcessDataService {
@@ -19,6 +21,7 @@ export class ProcessDataService {
     @InjectModel(Payment.name) private paymentModel: Model<Payment>,
     @InjectModel(Message.name) private messageModel: Model<Message>,
     private readonly pagarmeService: PagarmeService,
+    private readonly sendMessageService: SendMessageService,
   ) {}
 
   /**
@@ -39,7 +42,7 @@ export class ProcessDataService {
    * @param payload Dados do usuário e mensagem
    * @returns rate_Limit
    */
-  async sendMessage(payload: PayloadDto): Promise<number> {
+  async sendMessage(payload: PayloadDto): Promise<any> {
     try {
       const user = await this.findOneByFilters(payload.userData);
 
@@ -48,11 +51,14 @@ export class ProcessDataService {
       }
 
       if (user.rate_limit <= 0) {
-        throw new Error('Saldo insuficiente para enviar mensagem');
+        return {
+          saldo: 0,
+          message: 'Saldo insuficiente para enviar mensagem',
+        }
       }
 
       // Envia a mensagem para o WhatsApp 
-      // await this.whatsappService.sendMessage(mensagem.numeroDestinario, mensagem.mensagem); 
+      await this.sendMessageService.sendMessage(this.mapToSendMessageDto(payload));
 
       // Atualiza o rate_limit do usuário 
       user.rate_limit -= 1;
@@ -73,7 +79,7 @@ export class ProcessDataService {
     const query: any = {};
 
     query.celular = filters.celular;
-    query.email = filters.email;
+    //query.email = filters.email;
     query.taxId = filters.taxId;
 
     return this.userModel.findOne(query).exec();
@@ -144,4 +150,14 @@ private async salvaUsuario(userData: UserDataDto): Promise<User> {
       brCodeBase64: payment.qrCodeUrl,
     };
   }
+
+      private mapToSendMessageDto(payload: PayloadDto): SendMessageDto {
+      const dto = new SendMessageDto();
+      dto.senderName = payload.userData.nome;
+      dto.senderPhone = payload.userData.celular;
+      dto.senderMessage = payload.formData.mensagem;
+      dto.recipientName = payload.formData.nomeDestinario;
+      dto.recipientPhone = payload.formData.numeroDestinario;
+      return dto;
+    }
 }

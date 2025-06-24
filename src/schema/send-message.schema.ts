@@ -17,6 +17,9 @@ export class SendMessage extends Document {
 
   @Prop({ required: true })
   recipientPhone: string;
+
+  @Prop({ required: false, default: false })
+  status: boolean;
 }
 
 export const SendMessageSchema = SchemaFactory.createForClass(SendMessage);

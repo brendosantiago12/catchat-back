@@ -47,7 +47,7 @@ import { HealthCheckController } from './controller/health-check.controller';
     HttpModule,
   ],
   controllers: [ProcessDataController, WebhookController, HealthCheckController],
-  providers: [ProcessDataService, PagarmeService, ProcessWebHookService, SendMessageService ,
+  providers: [ProcessDataService, PagarmeService, ProcessWebHookService, SendMessageService , 
   {
     provide: APP_FILTER,
     useClass: GlobalExceptionFilter,

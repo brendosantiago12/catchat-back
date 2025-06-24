@@ -24,7 +24,7 @@ export class ConversationService implements OnModuleInit {
     private userConversationModel: Model<UserConversationModel>,
     @InjectModel(SendMessage.name)
     private sendMessageModel: Model<SendMessage>,
-  ) {}
+  ) { }
 
   /**
    * Inicializa o serviço quando o módulo é carregado
@@ -267,20 +267,35 @@ export class ConversationService implements OnModuleInit {
   }
 
   /**
-   * Busca a última mensagem secreta enviada para o usuário (recipientPhone)
+   * Busca uma lista de mensagens com status falso enviada para o usuário (recipientPhone)
    */
-  async getSecretMessageForUser(
+  async getSecretMessagesForUser(
     recipientPhone: string,
-  ): Promise<string | null> {
-    const doc = await this.sendMessageModel
-      .findOne({ recipientPhone })
-      .sort({ createdAt: -1 });
-    return doc?.senderMessage || null;
+  ): Promise<SendMessage[]> {
+    return await this.sendMessageModel
+      .find({ recipientPhone, status: false })
+      .sort({ createdAt: -1 })
+      .exec();
   }
 
   async getSecretMessageDocForUser(senderPhone: string): Promise<any | null> {
     return await this.sendMessageModel
       .findOne({ senderPhone })
       .sort({ createdAt: -1 });
+  }
+
+  async updateSecretMessageStatus(recipientPhone: string): Promise<void> {
+    try {
+      const result = await this.sendMessageModel.updateMany(
+        { recipientPhone, status: false }, // Filtro
+        { $set: { status: true } }      // Atualização
+      );
+
+      this.logger.log(
+        `Atualizado o status de ${result.modifiedCount} mensagens para usuário ${recipientPhone} para verdadeiro`,
+      );
+    } catch (error) {
+      this.logger.error('Erro ao atualizar o status das mensagens', error);
+    }
   }
 }

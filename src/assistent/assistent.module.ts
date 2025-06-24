@@ -27,6 +27,6 @@ import { SendMessage, SendMessageSchema } from '../schema/send-message.schema';
     AiService,
   ],
   controllers: [QrControllerController],
-  exports: [AiService],
+  exports: [AiService, WhatsappService],
 })
 export class AssistentModule {}

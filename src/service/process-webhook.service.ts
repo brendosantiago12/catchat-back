@@ -4,16 +4,22 @@ import { Model } from 'mongoose';
 import { User, Payment, Message } from '../schema/schemas';
 import { SendMessageService } from './send-message.service';
 import { SendMessageDto } from 'src/dto/send-message.dto';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class ProcessWebHookService {
+
+    private readonly startRateLimit: number;
 
     constructor(
         @InjectModel(User.name) private userModel: Model<User>,
         @InjectModel(Payment.name) private paymentModel: Model<Payment>,
         @InjectModel(Message.name) private messageModel: Model<Message>,
         private readonly sendMessageService: SendMessageService,
-    ) { }
+        private readonly configService: ConfigService,
+    ) { 
+        this.startRateLimit = this.configService.get<number>('START_RATE_LIMIT')!;
+    }
 
     /**
      * Método principal que processa toda a solicitação
@@ -27,7 +33,7 @@ export class ProcessWebHookService {
         this.validaAtualizaStatus(statusCompra, payment.id_compra);
 
         //busca a mensagem mais antiga pendente do usuário
-        this.findOldestOrderByUserIdAndStatus(payment.user_id, 'PENDING')
+        this.findLastOrderByUserIdAndStatus(payment.user_id, 'PENDING')
             .then(async (customerMessage) => {
                 if (customerMessage) {
 
@@ -43,7 +49,7 @@ export class ProcessWebHookService {
                         { new: true }
                     ).exec();
 
-                    //this.updateRateLimt(payment.user_id)  //utilizar quando estiver pronto o ajuste de 3 mensagens por compra
+                    this.updateRateLimt(payment.user_id)  //utilizar quando estiver pronto o ajuste de 3 mensagens por compra
                 } else {
                     throw new HttpException('Nenhuma mensagem pendente encontrada', HttpStatus.NOT_FOUND);
                 }
@@ -54,7 +60,7 @@ export class ProcessWebHookService {
         console.log('Atualizando rate_limit do usuário');
         const user = await this.userModel.findOneAndUpdate(
             { user_id },                           // busca pelo campo correto
-            { $inc: { rate_limit: 2 } },
+            { $inc: { rate_limit: this.startRateLimit } },
             { new: true }
         ).exec();
     }
@@ -69,11 +75,11 @@ export class ProcessWebHookService {
         return payment;
     }
 
-    async findOldestOrderByUserIdAndStatus(idUser: string, statusMessage: string): Promise<Message | null> {
+    async findLastOrderByUserIdAndStatus(idUser: string, statusMessage: string): Promise<Message | null> {
         console.log('Buscando mensagem mais antiga do usuário');
         const customerMessage = this.messageModel
             .findOne({ id_user: idUser, status_message: statusMessage })       // filtro pelos dois campos
-            .sort({ createdAt: 1 })            // 1 = mais antigo primeiro
+            .sort({ createdAt: -1 })            // 1 = mais antigo primeiro
             .exec();                           // retorna o primeiro da ordenação
         console.log('Mensagem encontrada:', customerMessage);
         return customerMessage;
