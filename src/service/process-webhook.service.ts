@@ -2,9 +2,12 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User, Payment, Message } from '../schema/schemas';
+import { Subscription } from '../schema/subscription.schema';
 import { SendMessageService } from './send-message.service';
 import { SendMessageDto } from 'src/dto/send-message.dto';
 import { ConfigService } from '@nestjs/config';
+
+const SUBSCRIPTION_DURATION_YEARS = 1;
 
 @Injectable()
 export class ProcessWebHookService {
@@ -15,9 +18,10 @@ export class ProcessWebHookService {
         @InjectModel(User.name) private userModel: Model<User>,
         @InjectModel(Payment.name) private paymentModel: Model<Payment>,
         @InjectModel(Message.name) private messageModel: Model<Message>,
+        @InjectModel(Subscription.name) private subscriptionModel: Model<Subscription>,
         private readonly sendMessageService: SendMessageService,
         private readonly configService: ConfigService,
-    ) { 
+    ) {
         this.startRateLimit = this.configService.get<number>('START_RATE_LIMIT')!;
     }
 
@@ -29,40 +33,54 @@ export class ProcessWebHookService {
         const statusCompra = payload.data.status;
 
         const payment = await this.findByCompraId(idCompra);
+        await this.validaAtualizaStatus(statusCompra, payment.id_compra);
 
-        this.validaAtualizaStatus(statusCompra, payment.id_compra);
+        const customerMessage = await this.findLastOrderByUserIdAndStatus(payment.user_id, 'PENDING');
+        if (!customerMessage) {
+            throw new HttpException('Nenhuma mensagem pendente encontrada', HttpStatus.NOT_FOUND);
+        }
 
-        //busca a mensagem mais antiga pendente do usuário
-        this.findLastOrderByUserIdAndStatus(payment.user_id, 'PENDING')
-            .then(async (customerMessage) => {
-                if (customerMessage) {
+        await this.sendMessageService.sendMessage(this.mapToSendMessageDto(customerMessage));
 
-                    // envia mensagem para o WhatsApp
-                    await this.sendMessageService.sendMessage(this.mapToSendMessageDto(customerMessage));
+        customerMessage.status_message = 'SENT';
+        console.log('Atualizando mensagem para SENT');
+        await this.messageModel.findOneAndUpdate(
+            { id_mensagem: customerMessage.id_mensagem },
+            customerMessage,
+            { new: true }
+        ).exec();
 
-                    // Atualiza a mensagem mais antiga para 'SENT'
-                    customerMessage.status_message = 'SENT';
-                    console.log('Atualizando mensagem para SENT');
-                    await this.messageModel.findOneAndUpdate(
-                        { id_mensagem: customerMessage.id_mensagem },
-                        customerMessage,
-                        { new: true }
-                    ).exec();
-
-                    this.updateRateLimt(payment.user_id)  //utilizar quando estiver pronto o ajuste de 3 mensagens por compra
-                } else {
-                    throw new HttpException('Nenhuma mensagem pendente encontrada', HttpStatus.NOT_FOUND);
-                }
-            })
+        if (payment.productType === 'UNLIMITED') {
+            await this.createOrRenewSubscription(customerMessage.numeroRemetente);
+        } else {
+            await this.updateRateLimt(payment.user_id);
+        }
     }
 
     async updateRateLimt(user_id: string): Promise<void> {
         console.log('Atualizando rate_limit do usuário');
-        const user = await this.userModel.findOneAndUpdate(
-            { user_id },                           // busca pelo campo correto
+        await this.userModel.findOneAndUpdate(
+            { user_id },
             { $inc: { rate_limit: this.startRateLimit } },
             { new: true }
         ).exec();
+    }
+
+    async createOrRenewSubscription(userPhone: string): Promise<void> {
+        const existing = await this.subscriptionModel.findOne({
+            userPhone,
+            status: 'ACTIVE',
+        }).exec();
+
+        const expiresAt = new Date();
+        expiresAt.setFullYear(expiresAt.getFullYear() + SUBSCRIPTION_DURATION_YEARS);
+
+        if (existing) {
+            // Renova estendendo a partir de hoje
+            await this.subscriptionModel.findByIdAndUpdate(existing._id, { expiresAt });
+        } else {
+            await this.subscriptionModel.create({ userPhone, status: 'ACTIVE', expiresAt });
+        }
     }
 
     async findByCompraId(idCompra: string): Promise<Payment> {
@@ -77,10 +95,10 @@ export class ProcessWebHookService {
 
     async findLastOrderByUserIdAndStatus(idUser: string, statusMessage: string): Promise<Message | null> {
         console.log('Buscando mensagem mais antiga do usuário');
-        const customerMessage = this.messageModel
-            .findOne({ id_user: idUser, status_message: statusMessage })       // filtro pelos dois campos
-            .sort({ createdAt: -1 })            // 1 = mais antigo primeiro
-            .exec();                           // retorna o primeiro da ordenação
+        const customerMessage = await this.messageModel
+            .findOne({ id_user: idUser, status_message: statusMessage })
+            .sort({ createdAt: 1 })
+            .exec();
         console.log('Mensagem encontrada:', customerMessage);
         return customerMessage;
     }
@@ -104,12 +122,13 @@ export class ProcessWebHookService {
     }
 
     private mapToSendMessageDto(message: Message): SendMessageDto {
-    const dto = new SendMessageDto();
-    dto.senderName = message.userName;
-    dto.senderPhone = message.numeroRemetente;
-    dto.senderMessage = message.mensagem;
-    dto.recipientName = message.nomeDestinario;
-    dto.recipientPhone = message.numeroDestinario;
-    return dto;
-  }
+        const dto = new SendMessageDto();
+        dto.senderName = message.userName;
+        dto.senderPhone = message.numeroRemetente;
+        dto.senderMessage = message.mensagem;
+        dto.recipientName = message.nomeDestinario;
+        dto.recipientPhone = message.numeroDestinario;
+        dto.productType = message.productType;
+        return dto;
+    }
 }

@@ -1,41 +1,43 @@
-import { Controller, Post, Body, HttpException, HttpStatus, Query, HttpCode, Param } from '@nestjs/common';
+import { Controller, Post, Body, HttpException, HttpStatus, HttpCode } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { ProcessWebHookService } from '../service/process-webhook.service';
-import { PayloadDto, QrCodeResponseDto } from '../dto/dto';
 
+@ApiTags('Webhook')
 @Controller('api')
 export class WebhookController {
   constructor(private readonly processWebHookService: ProcessWebHookService) { }
 
   @Post('webhook')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Receber evento de pagamento do Pagar.me',
+    description: 'Endpoint chamado automaticamente pelo Pagar.me quando o status de um pedido muda. Confirma o pagamento e dispara o envio da mensagem ao destinatário.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      example: {
+        data: {
+          id: 'order_abc123',
+          status: 'paid',
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 204, description: 'Evento processado com sucesso.' })
+  @ApiResponse({ status: 400, description: 'Pedido não encontrado.' })
+  @ApiResponse({ status: 500, description: 'Erro interno ao processar o webhook.' })
   async processData(@Body() payload: any): Promise<void> {
-      //@Query('webhookSecret') webhookSecret: string,): Promise<void> {
     try {
-      //this.validaPayloadSecret(payload, webhookSecret);
       console.log('#################### WEBHOOK ################################');
       console.log('payload recebido', payload);
       this.processWebHookService.processWebHook(payload);
-
     } catch (error) {
       console.log('deu merda')
       throw new HttpException(
         error.message || 'Desculpe, não conseguimos processar sua solicitação',
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
-    }
-  }
-
-  validaPayloadSecret(payload: any, webhookSecret: string): void {
-    if (!payload) {
-      throw new HttpException('Payload não informado', HttpStatus.UNAUTHORIZED);
-    }
-
-    if (!webhookSecret) {
-      throw new HttpException('Webhook Secret não informado', HttpStatus.UNAUTHORIZED);
-    }
-
-    if (webhookSecret !== process.env.ABACATE_PAY_WEBHOOK_SECRET_CATLOVE) {
-      throw new HttpException('Webhook Secret inválido', HttpStatus.UNAUTHORIZED);
     }
   }
 }

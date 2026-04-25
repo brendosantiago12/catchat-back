@@ -1,7 +1,10 @@
-import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ChatOpenAI } from '@langchain/openai';
 import { ConversationService } from '../conversation/conversation.service';
-import { WhatsappService } from '../whatsapp/whatsapp.service';
+import {
+  IMessageSender,
+  MESSAGE_SENDER,
+} from '../../common/messaging/messaging.interface';
 import { RouterChain } from './chains/routerChain';
 
 @Injectable()
@@ -12,8 +15,8 @@ export class AiService {
 
   constructor(
     private conversationService: ConversationService,
-    @Inject(forwardRef(() => WhatsappService))
-    private readonly whatsApp: WhatsappService,
+    @Inject(MESSAGE_SENDER)
+    private readonly messageSender: IMessageSender,
   ) {
     this.model = new ChatOpenAI({
       modelName: 'gpt-4o-mini-2024-07-18',
@@ -40,7 +43,7 @@ export class AiService {
 
       responseText = this.handleResponseText(response);
       await this.conversationService.addAssistantResponse(userId, responseText);
-      this.whatsApp.sendMessage(userId, responseText);
+      this.messageSender.send(userId, responseText);
 
       return { text: responseText };
     } catch (error) {

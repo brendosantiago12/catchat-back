@@ -1,49 +1,58 @@
 /* eslint-disable @typescript-eslint/prefer-promise-reject-errors */
 import {
-  forwardRef,
-  Inject,
   Injectable,
   Logger,
   OnModuleInit,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import * as QRCode from 'qrcode';
 import { Client, RemoteAuth } from 'whatsapp-web.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Subject } from 'rxjs';
 import { ConfigService } from '@nestjs/config';
-import { AiService } from '../ai/ai.service';
-import { Debouncer, MessageQueueItem } from './debouncer';
 import { WhatsappSessionStoreService } from './whatsappSessionStore';
 import { WhatsappFormatter } from './whatsappFormater.service';
+import { IMessageSender } from '../../common/messaging/messaging.interface';
+import { MessagePipelineService } from '../pre-hooks/message-pipeline.service';
+import { AiService } from '../ai/ai.service';
+import { BotStateService } from './bot-state.service';
 
 @Injectable()
-export class WhatsappService implements OnModuleInit {
+export class WhatsappService implements OnModuleInit, IMessageSender {
   private currentQrCode: string | null = null;
   private qrCodeSubject = new Subject<string>();
   private readonly tempDir = path.join(process.cwd(), 'temp');
   private readonly logger = new Logger(WhatsappService.name);
   private readonly client: Client;
   private readonly formatter: WhatsappFormatter;
-  private readonly debouncer: Debouncer;
+  private pipeline!: MessagePipelineService;
+  private aiService!: AiService;
+  private readonly readyPromise: Promise<void>;
+  private resolveReady!: () => void;
 
   constructor(
-    @Inject(forwardRef(() => AiService))
-    private readonly aiService: AiService,
+    private readonly moduleRef: ModuleRef,
     private readonly sessionStore: WhatsappSessionStoreService,
     private readonly configService: ConfigService,
+    private readonly botState: BotStateService,
   ) {
+    this.readyPromise = new Promise((resolve) => {
+      this.resolveReady = resolve;
+    });
     this.formatter = new WhatsappFormatter();
-    this.debouncer = new Debouncer();
     this.client = this.initializeClient();
     this.setupEventListeners();
   }
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
+    this.pipeline = this.moduleRef.get(MessagePipelineService, { strict: false });
+    this.aiService = this.moduleRef.get(AiService, { strict: false });
+
     if (!fs.existsSync(this.tempDir)) {
       fs.mkdirSync(this.tempDir, { recursive: true });
     }
-    this.initializeWhatsapp();
+    await this.initializeWhatsapp();
   }
 
   private initializeClient(): Client {
@@ -58,8 +67,14 @@ export class WhatsappService implements OnModuleInit {
         store: this.sessionStore,
         backupSyncIntervalMs: 60_000,
       }),
+      webVersion: '2.3000.1036821440',
+      webVersionCache: {
+        type: 'remote',
+        remotePath:
+          'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}-alpha.html',
+      },
       puppeteer: {
-        headless: true, // Forçar modo headless
+        headless: true,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -68,20 +83,19 @@ export class WhatsappService implements OnModuleInit {
           '--no-first-run',
           '--no-zygote',
           '--disable-gpu',
-          '--single-process', // Importante para alguns ambientes serverless
           '--disable-extensions',
           '--disable-infobars',
           '--ignore-certificate-errors',
           '--ignore-certificate-errors-spki-list',
-          '--use-gl=egl', // Melhora performance no modo headless
+          '--use-gl=egl',
         ].filter(Boolean),
       },
     });
   }
 
-  private initializeWhatsapp(): void {
+  private async initializeWhatsapp(): Promise<void> {
     try {
-      this.client.initialize();
+      await this.client.initialize();
     } catch (error) {
       this.logger.error('Erro ao inicializar WhatsApp:', error);
       throw new Error('Falha ao inicializar cliente WhatsApp');
@@ -100,7 +114,6 @@ export class WhatsappService implements OnModuleInit {
       this.currentQrCode = qr;
       this.qrCodeSubject.next(qr);
       this.logger.log('QR Code gerado:', this.currentQrCode);
-      // qrcode.generate(qr, { small: true });
     });
   }
 
@@ -143,12 +156,14 @@ export class WhatsappService implements OnModuleInit {
       return qrCodeDataUrl;
     } catch (error) {
       this.logger.error('Failed to generate QR code data URL', error);
-      throw new Error('Could not generate QR code: ' + error.message);
+      throw new Error('Could not generate QR code: ' + (error instanceof Error ? error.message : String(error)));
     }
   }
 
   private setupReadyListener(): void {
     this.client.on('ready', () => {
+      this.botState.setReadyAt(Math.floor(Date.now() / 1000));
+      this.resolveReady();
       this.logger.log('WhatsApp Web conectado com sucesso!');
     });
   }
@@ -156,51 +171,20 @@ export class WhatsappService implements OnModuleInit {
   private setupMessageListener(): void {
     this.client.on('message', async (message) => {
       try {
-        this.logger.log(
-          `Mensagem recebida de ${message.from}: ${message.body}`,
-        );
+        const contact = await message.getContact();
+        const phone = contact.number;
 
-        const cleanPhone = this.formatter.cleanPhoneNumber(message.from);
-        const messageItem: MessageQueueItem = { message };
+        this.logger.log(`Mensagem recebida de ${phone}: ${message.body}`);
 
-        this.debouncer.enqueue(cleanPhone, messageItem, (items) =>
-          this.processQueuedMessages(cleanPhone, items),
+        await this.pipeline.run(
+          { phone, text: message.body, rawItems: [{ message }] },
+          async (ctx) => { await this.aiService.processMessage(ctx.phone, ctx.text); },
         );
       } catch (error) {
-        this.logger.error(`Erro ao processar mensagem: ${error.message}`);
+        this.logger.error(`Erro ao processar mensagem: ${error instanceof Error ? error.message : String(error)}`);
         message.reply('Desculpe, ocorreu um erro ao processar sua mensagem.');
       }
     });
-  }
-
-  private async processQueuedMessages(
-    phone: string,
-    items: MessageQueueItem[],
-  ): Promise<void> {
-    this.logger.log(
-      `Processando lote de ${items.length} mensagens para o telefone ${phone}`,
-    );
-    try {
-      let combinedText = '';
-      if (items.length === 0) return;
-
-      // Processa cada item da fila
-      for (const item of items) {
-        combinedText += `${item.message.body}\n`;
-      }
-
-      combinedText = combinedText.trim();
-      await this.aiService.processMessage(phone, combinedText);
-    } catch (error) {
-      this.logger.error(
-        `Erro ao processar lote de mensagens: ${error.message}`,
-      );
-      if (items.length > 0 && items[0].message) {
-        items[0].message.reply(
-          'Desculpe, ocorreu um erro ao processar suas mensagens.',
-        );
-      }
-    }
   }
 
   private handleSendMessageError(number: string, error: Error): void {
@@ -209,16 +193,21 @@ export class WhatsappService implements OnModuleInit {
     throw new Error(`${errorMessage}. Erro: ${error.message}`);
   }
 
-  public async sendMessage(number: string, message: string): Promise<void> {
+  public async send(phone: string, message: string): Promise<void> {
+    await this.readyPromise;
     try {
-      this.logger.log(`numero: ${number}`);
-      const formattedNumber = this.formatter.formatPhoneNumber(number);
-      this.logger.log(`formattedNumber: ${formattedNumber}`);
-      this.logger.debug(`Enviando mensagem para: ${formattedNumber}`);
+      const formattedNumber = this.formatter.formatPhoneNumber(phone);
+      this.logger.debug(`Resolvendo número: ${formattedNumber}`);
 
-      await this.client.sendMessage(formattedNumber, message);
+      const numberId = await this.client.getNumberId(formattedNumber);
+      if (!numberId) {
+        throw new Error(`Número não encontrado no WhatsApp: ${formattedNumber}`);
+      }
+
+      this.logger.debug(`Enviando mensagem para: ${numberId._serialized}`);
+      await this.client.sendMessage(numberId._serialized, message);
     } catch (error) {
-      this.handleSendMessageError(number, error);
+      this.handleSendMessageError(phone, error instanceof Error ? error : new Error(String(error)));
     }
   }
 }

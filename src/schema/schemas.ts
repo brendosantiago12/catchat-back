@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
+import { ProductType } from './send-message.schema';
 
 //USER SCHEMA
 @Schema({ timestamps: true })
@@ -51,6 +52,9 @@ export class Payment extends Document {
   @Prop({ required: true })
   status: string;
 
+  @Prop({ required: true })
+  productType: ProductType;
+
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);
@@ -82,6 +86,9 @@ export class Message extends Document {
 
   @Prop({ required: true })
   status_message: string;
+
+  @Prop({ required: true })
+  productType: ProductType;
 }
 
 export const MessageSchema = SchemaFactory.createForClass(Message);

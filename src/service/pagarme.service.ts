@@ -3,12 +3,13 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { lastValueFrom } from 'rxjs';
 import { PixResponseDto, UserDataDto, HomePhoneDto } from 'src/dto/dto';
+import { ProductType } from '../schema/send-message.schema';
 
 @Injectable()
 export class PagarmeService {
     private readonly apiUrl: string;
     private readonly apiKey: string;
-    private readonly amountPix: number;
+    private readonly amountByProduct: Record<ProductType, number>;
 
     constructor(
         private readonly httpService: HttpService,
@@ -16,17 +17,22 @@ export class PagarmeService {
     ) {
         this.apiUrl = this.configService.get<string>('PAGARME_URL')!;
         this.apiKey = this.configService.get<string>('PAGARME_API_KEY')!;
-        this.amountPix = this.configService.get<number>('AMOUNT_PIX')!;
+        this.amountByProduct = {
+            MESSAGE_ONLY: this.configService.get<number>('AMOUNT_PIX_MESSAGE_ONLY')!,
+            MESSAGE_TUNNEL: this.configService.get<number>('AMOUNT_PIX_MESSAGE_TUNNEL')!,
+            UNLIMITED: this.configService.get<number>('AMOUNT_PIX_UNLIMITED')!,
+        };
     }
 
     /**
      * Gera um QrCode PIX
      * @param userData Dados do usuário
+     * @param productType Tipo do produto
      * @returns QrCode gerado
      */
-    async createPixQrCode(userData: UserDataDto): Promise<PixResponseDto> {
+    async createPixQrCode(userData: UserDataDto, productType: ProductType): Promise<PixResponseDto> {
         console.log('PagarmeService: criando QrCode PIX');
-        const amount = this.amountPix; // Valor em centavos
+        const amount = this.amountByProduct[productType];
         const expiresIn = 3600; // 1 hora de expiração
         const description = "CatChat - Mensagens anonimas via WhatsApp";
         const numberUser = this.getHomePhone(userData);
@@ -43,7 +49,7 @@ export class PagarmeService {
                     ],
                     customer: {
                         name: userData.nome,
-                        email: "persantech@gmail.com",
+                        email: userData.email,
                         type: 'individual',
                         document: userData.taxId.replace(/\D/g, ''), // Remove caracteres não numéricos
                         phones: {
@@ -76,7 +82,7 @@ export class PagarmeService {
                 }),
             );
 
-            if (status !== 200) {
+            if (status !== 200 && status !== 201) {
                 throw new HttpException('Desculpe, não conseguimos gerar o QrCode no momento', HttpStatus.BAD_REQUEST);
             }
 
@@ -92,6 +98,8 @@ export class PagarmeService {
 
             return qrCodeResponse;
         } catch (error) {
+            const detail = (error as any)?.response?.data ?? (error as any)?.message ?? error;
+            console.error('PagarmeService: erro na chamada à API:', JSON.stringify(detail));
             throw new HttpException('Desculpe, não conseguimos gerar o QrCode no momento', HttpStatus.BAD_REQUEST);
         }
     }
