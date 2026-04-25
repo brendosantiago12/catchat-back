@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import * as QRCode from 'qrcode';
-import { Client, RemoteAuth } from 'whatsapp-web.js';
+import { Client } from 'whatsapp-web.js';
+import { MongoAuth } from './mongo-auth.strategy';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Subject } from 'rxjs';
@@ -23,6 +24,7 @@ export class WhatsappService implements OnModuleInit, IMessageSender {
   private currentQrCode: string | null = null;
   private qrCodeSubject = new Subject<string>();
   private readonly tempDir = path.join(process.cwd(), 'temp');
+  private readonly wwebjsDataPath = path.join(process.cwd(), '.wwebjs_auth');
   private readonly logger = new Logger(WhatsappService.name);
   private readonly client: Client;
   private readonly formatter: WhatsappFormatter;
@@ -62,10 +64,11 @@ export class WhatsappService implements OnModuleInit, IMessageSender {
     this.logger.log(`Inicializando cliente WhatsApp com ID: ${clientId}`);
 
     return new Client({
-      authStrategy: new RemoteAuth({
+      authStrategy: new MongoAuth({
         clientId,
         store: this.sessionStore,
-        backupSyncIntervalMs: 60_000,
+        backupSyncIntervalMs: 300_000,
+        dataPath: this.wwebjsDataPath,
       }),
       webVersion: '2.3000.1036821440',
       webVersionCache: {
@@ -165,6 +168,10 @@ export class WhatsappService implements OnModuleInit, IMessageSender {
       this.botState.setReadyAt(Math.floor(Date.now() / 1000));
       this.resolveReady();
       this.logger.log('WhatsApp Web conectado com sucesso!');
+    });
+
+    this.client.on('remote_session_saved', () => {
+      this.logger.log('Sessão WhatsApp persistida no MongoDB com sucesso');
     });
   }
 

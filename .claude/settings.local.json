@@ -5,7 +5,15 @@
       "WebFetch(domain:api.anthropic.com)",
       "Bash(npm install *)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:docs.wwebjs.dev)"
+      "WebFetch(domain:docs.wwebjs.dev)",
+      "WebFetch(domain:wwebjs.dev)",
+      "Bash(curl -s \"https://wwebjs.dev/guide/creating-your-bot/authentication.html\")",
+      "Read(//tmp/**)",
+      "Bash(sed 's/<[^>]*>//g')",
+      "Read(//c/Users/Brendo/.claude/plans/**)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Brendo\\.claude\\plans"
     ]
   }
 }

@@ -4,6 +4,7 @@ import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import { Store } from 'whatsapp-web.js';
 import * as fs from 'fs';
+import * as path from 'path';
 import { GridFSBucket } from 'mongodb';
 
 @Injectable()
@@ -30,26 +31,29 @@ export class WhatsappSessionStoreService implements Store {
 
   async save(options: { session: string }): Promise<void> {
     const session = options.session;
+    // RemoteAuth passa session como caminho completo ao diretório da sessão.
+    // O ZIP é criado ao lado desse diretório: session + ".zip"
     const zipPath = `${session}.zip`;
-    this.logger.debug(`Salvando sessão ${session} a partir de ${zipPath}`);
+    const sessionName = path.basename(session);
+
+    this.logger.debug(`Salvando sessão ${sessionName} a partir de ${zipPath}`);
 
     if (!fs.existsSync(zipPath)) {
       this.logger.warn(`Arquivo de sessão não encontrado em disco: ${zipPath}`);
       return;
     }
 
-    const bucket = this.getBucket(session);
+    const bucket = this.getBucket(sessionName);
 
-    // Remove todos os arquivos anteriores antes de salvar o novo
-    const docs = await bucket.find({ filename: `${session}.zip` }).toArray();
+    const docs = await bucket.find({ filename: `${sessionName}.zip` }).toArray();
     if (docs.length > 0) {
       this.logger.debug(
-        `Removendo ${docs.length} arquivos antigos da sessão ${session}`,
+        `Removendo ${docs.length} arquivos antigos da sessão ${sessionName}`,
       );
       await Promise.all(docs.map((doc) => bucket.delete(doc._id)));
     }
 
-    const upload = bucket.openUploadStream(`${session}.zip`);
+    const upload = bucket.openUploadStream(`${sessionName}.zip`);
     const stream = fs.createReadStream(zipPath);
 
     await new Promise<void>((resolve, reject) => {
@@ -60,7 +64,7 @@ export class WhatsappSessionStoreService implements Store {
           reject(err);
         })
         .on('finish', () => {
-          this.logger.debug(`Sessão ${session} salva no MongoDB`);
+          this.logger.debug(`Sessão ${sessionName} salva no MongoDB`);
           resolve();
         });
     });
