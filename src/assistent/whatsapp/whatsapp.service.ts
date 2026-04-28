@@ -54,7 +54,9 @@ export class WhatsappService implements OnModuleInit, IMessageSender {
     if (!fs.existsSync(this.tempDir)) {
       fs.mkdirSync(this.tempDir, { recursive: true });
     }
-    await this.initializeWhatsapp();
+    this.initializeWhatsapp().catch((err) => {
+      this.logger.error('Falha ao inicializar WhatsApp em background:', err);
+    });
   }
 
   private initializeClient(): Client {
