@@ -2,7 +2,7 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { lastValueFrom } from 'rxjs';
-import { PixResponseDto, UserDataDto, HomePhoneDto } from 'src/dto/dto';
+import { PixResponseDto, UserDataDto, HomePhoneDto } from '../dto/dto';
 import { ProductType } from '../schema/send-message.schema';
 
 @Injectable()

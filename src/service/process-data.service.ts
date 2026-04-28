@@ -10,7 +10,7 @@ import {
 } from '../dto/dto';
 import { PagarmeService } from './pagarme.service';
 import { SendMessageService } from './send-message.service';
-import { SendMessageDto } from 'src/dto/send-message.dto';
+import { SendMessageDto } from '../dto/send-message.dto';
 import { WhatsappFormatter } from '../assistent/whatsapp/whatsappFormater.service';
 
 @Injectable()

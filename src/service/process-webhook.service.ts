@@ -4,7 +4,7 @@ import { Model } from 'mongoose';
 import { User, Payment, Message } from '../schema/schemas';
 import { Subscription } from '../schema/subscription.schema';
 import { SendMessageService } from './send-message.service';
-import { SendMessageDto } from 'src/dto/send-message.dto';
+import { SendMessageDto } from '../dto/send-message.dto';
 import { ConfigService } from '@nestjs/config';
 
 const SUBSCRIPTION_DURATION_YEARS = 1;
