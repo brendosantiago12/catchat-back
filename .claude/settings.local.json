@@ -22,7 +22,13 @@
       "mcp__claude_ai_Supabase__pause_project",
       "mcp__claude_ai_Supabase__confirm_cost",
       "mcp__claude_ai_Supabase__get_project_url",
-      "mcp__claude_ai_Supabase__get_publishable_keys"
+      "mcp__claude_ai_Supabase__get_publishable_keys",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Brendo\\\\Projetos\\\\Cupido\\\\CatChat\\\\catchat-back\" -Force)",
+      "PowerShell(Invoke-WebRequest -Uri 'https://fly.io/install.ps1' -OutFile \"$env:TEMP\\\\fly-install.ps1\"; & \"$env:TEMP\\\\fly-install.ps1\")",
+      "Bash('C:\\\\Users\\\\Brendo\\\\.fly\\\\bin\\\\flyctl.exe' secrets *)",
+      "Bash(\"C:\\\\Users\\\\Brendo\\\\.fly\\\\bin\\\\flyctl.exe\" deploy *)",
+      "WebFetch(domain:fly.io)",
+      "WebFetch(domain:deployhandbook.com)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Brendo\\.claude\\plans"
