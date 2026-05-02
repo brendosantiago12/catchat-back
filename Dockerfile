@@ -43,8 +43,9 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
 
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
+
+RUN mkdir -p /app/.wwebjs_auth
 
 EXPOSE 3000
 CMD ["node", "--max-old-space-size=350", "dist/main"]

@@ -75,6 +75,8 @@ export class WhatsappSessionStoreService implements Store {
     const bucket = this.getBucket(session);
     this.logger.debug(`Extraindo sessão ${session} para ${options.path}`);
 
+    fs.mkdirSync(path.dirname(options.path), { recursive: true });
+
     await new Promise<void>((resolve, reject) => {
       bucket
         .openDownloadStreamByName(`${session}.zip`)
