@@ -17,7 +17,9 @@ export class AlertOfSendChain extends BaseChain {
     );
 
     return {
-      response: `Ooi ${doc.senderName}!! 💌\n\n Passando pra avisar que sua carta foi enviada com sucesso para ${doc.recipientName}.`,
+      response: doc
+        ? `Ooi ${doc.senderName}!! 💌\n\n Passando pra avisar que sua carta foi enviada com sucesso para ${doc.recipientName}.`
+        : `Olá! Sua carta foi enviada com sucesso! 💌`,
       intent: 'ALERT_OF_SEND',
     };
 

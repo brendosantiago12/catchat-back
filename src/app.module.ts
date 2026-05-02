@@ -9,22 +9,14 @@ import { ProcessDataService } from './service/process-data.service';
 import { PagarmeService } from './service/pagarme.service';
 import { ProcessWebHookService } from './service/process-webhook.service';
 import { SendMessageService } from './service/send-message.service';
+import { OtpService } from './service/otp.service';
 import { GlobalExceptionFilter } from './exception/GlobalExceptionFilter';
 import { AssistentModule } from './assistent/assistent.module';
 import { DevModule } from './dev/dev.module';
 import { HealthCheckController } from './controller/health-check.controller';
 import { WebhookController } from './controller/webhook.controller';
-import {
-  User,
-  UserSchema,
-  Payment,
-  PaymentSchema,
-  Message,
-  MessageSchema,
-} from './schema/schemas';
-import { SendMessage, SendMessageSchema } from './schema/send-message.schema';
-import { TunnelSession, TunnelSessionSchema } from './schema/tunnel-session.schema';
-import { Subscription, SubscriptionSchema } from './schema/subscription.schema';
+import { SubscriptionController } from './controller/subscription.controller';
+import { SupabaseModule } from './supabase/supabase.module';
 
 @Module({
   imports: [
@@ -33,6 +25,7 @@ import { Subscription, SubscriptionSchema } from './schema/subscription.schema';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    SupabaseModule,
     AssistentModule,
     ...(process.env.NODE_ENV === 'development' ? [DevModule] : []),
     MongooseModule.forRootAsync({
@@ -42,22 +35,15 @@ import { Subscription, SubscriptionSchema } from './schema/subscription.schema';
       }),
       inject: [ConfigService],
     }),
-    MongooseModule.forFeature([
-      { name: User.name, schema: UserSchema },
-      { name: Payment.name, schema: PaymentSchema },
-      { name: Message.name, schema: MessageSchema },
-      { name: SendMessage.name, schema: SendMessageSchema },
-      { name: TunnelSession.name, schema: TunnelSessionSchema },
-      { name: Subscription.name, schema: SubscriptionSchema },
-    ]),
     HttpModule,
   ],
-  controllers: [ProcessDataController, WebhookController, HealthCheckController],
+  controllers: [ProcessDataController, WebhookController, HealthCheckController, SubscriptionController],
   providers: [
     ProcessDataService,
     PagarmeService,
     ProcessWebHookService,
     SendMessageService,
+    OtpService,
     {
       provide: APP_FILTER,
       useClass: GlobalExceptionFilter,

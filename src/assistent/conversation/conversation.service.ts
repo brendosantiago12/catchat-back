@@ -1,13 +1,9 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import {
-  UserConversationModel,
-  ConversationMessage,
-  UserConversation,
-} from './conversation.schema';
+import { ConversationMessage, UserConversation } from './conversation.schema';
 import { SendMessage } from '../../schema/send-message.schema';
+import { SUPABASE_CLIENT } from '../../supabase/supabase.module';
 
 @Injectable()
 export class ConversationService implements OnModuleInit {
@@ -20,17 +16,10 @@ export class ConversationService implements OnModuleInit {
   private readonly MAX_MESSAGES_TO_LOAD = 10;
 
   constructor(
-    @InjectModel(UserConversationModel.name)
-    private userConversationModel: Model<UserConversationModel>,
-    @InjectModel(SendMessage.name)
-    private sendMessageModel: Model<SendMessage>,
-  ) { }
+    @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
+  ) {}
 
-  /**
-   * Inicializa o serviço quando o módulo é carregado
-   */
   async onModuleInit() {
-    // Configurar intervalos periódicos
     setInterval(
       () => this.cleanupMemoryConversations(),
       1000 * 60 * this.MEMORY_CLEANUP_MINUTES,
@@ -39,9 +28,6 @@ export class ConversationService implements OnModuleInit {
     this.logger.log('ConversationService inicializado');
   }
 
-  /**
-   * Adiciona uma mensagem do usuário ao histórico e salva imediatamente no MongoDB
-   */
   async addMsgUserHistory(userId: string, content: string): Promise<void> {
     this.ensureUserExists(userId);
 
@@ -51,7 +37,6 @@ export class ConversationService implements OnModuleInit {
       timestamp: new Date(),
     };
 
-    // Atualizar em memória
     const conversation = this.conversations.get(userId);
     if (!conversation) {
       this.logger.error(`Conversa não encontrada para o usuário ${userId}`);
@@ -61,27 +46,13 @@ export class ConversationService implements OnModuleInit {
     conversation.lastActivity = new Date();
     this.conversations.set(userId, conversation);
 
-    // Salvar imediatamente no MongoDB
     try {
-      await this.userConversationModel.findOneAndUpdate(
-        { userId },
-        {
-          $push: { messages: message },
-          $set: { lastActivity: new Date() },
-        },
-        { upsert: true },
-      );
+      await this.upsertConversation(userId, conversation.messages, conversation.lastActivity);
     } catch (error) {
-      this.logger.error(
-        `Erro ao salvar mensagem do usuário ${userId} no MongoDB`,
-        error,
-      );
+      this.logger.error(`Erro ao salvar mensagem do usuário ${userId} no Supabase`, error);
     }
   }
 
-  /**
-   * Adiciona uma resposta do assistente ao histórico e salva imediatamente no MongoDB
-   */
   async addAssistantResponse(userId: string, content: string): Promise<void> {
     this.ensureUserExists(userId);
 
@@ -91,7 +62,6 @@ export class ConversationService implements OnModuleInit {
       timestamp: new Date(),
     };
 
-    // Atualizar em memória
     const conversation = this.conversations.get(userId);
     if (!conversation) {
       this.logger.error(`Conversa não encontrada para o usuário ${userId}`);
@@ -101,36 +71,19 @@ export class ConversationService implements OnModuleInit {
     conversation.lastActivity = new Date();
     this.conversations.set(userId, conversation);
 
-    // Salvar imediatamente no MongoDB
     try {
-      await this.userConversationModel.findOneAndUpdate(
-        { userId },
-        {
-          $push: { messages: message },
-          $set: { lastActivity: new Date() },
-        },
-        { upsert: true },
-      );
+      await this.upsertConversation(userId, conversation.messages, conversation.lastActivity);
     } catch (error) {
-      this.logger.error(
-        `Erro ao salvar resposta para ${userId} no MongoDB`,
-        error,
-      );
-      // Continua executando normalmente mesmo em caso de erro com o MongoDB
+      this.logger.error(`Erro ao salvar resposta para ${userId} no Supabase`, error);
     }
   }
 
-  /**
-   * Retorna o histórico de conversa de um usuário do cache ou carrega do MongoDB se necessário
-   */
   getUserHistory(userId: string, limit: number = 10): ConversationMessage[] {
-    // Se não existe em memória, tenta carregar do MongoDB
     if (!this.conversations.has(userId)) {
       this.loadUserConversationFromDB(userId);
-      return []; // Retorna vazio imediatamente, o carregamento é assíncrono
+      return [];
     }
 
-    // Obter as últimas X mensagens
     const conversation = this.conversations.get(userId);
     if (!conversation) {
       this.logger.error(`Conversa não encontrada para o usuário ${userId}`);
@@ -139,13 +92,9 @@ export class ConversationService implements OnModuleInit {
     return conversation.messages.slice(-limit);
   }
 
-  /**
-   * Limpa o histórico de conversa de um usuário (em memória e no MongoDB)
-   */
   async clearUserHistory(userId: string): Promise<void> {
     this.ensureUserExists(userId);
 
-    // Limpar em memória
     const conversation = this.conversations.get(userId);
     if (!conversation) {
       this.logger.error(`Conversa não encontrada para o usuário ${userId}`);
@@ -155,30 +104,13 @@ export class ConversationService implements OnModuleInit {
     conversation.lastActivity = new Date();
     this.conversations.set(userId, conversation);
 
-    // Limpar no MongoDB
     try {
-      await this.userConversationModel.findOneAndUpdate(
-        { userId },
-        {
-          $set: {
-            messages: [],
-            lastActivity: new Date(),
-          },
-        },
-        { upsert: true },
-      );
+      await this.upsertConversation(userId, [], conversation.lastActivity);
     } catch (error) {
-      this.logger.error(
-        `Erro ao limpar conversa de ${userId} no MongoDB`,
-        error,
-      );
+      this.logger.error(`Erro ao limpar conversa de ${userId} no Supabase`, error);
     }
   }
 
-  /**
-   * Garante que o usuário existe no mapa de conversas
-   * Se não existir, cria uma nova conversa em memória e tenta carregar do MongoDB
-   */
   private ensureUserExists(userId: string): void {
     if (!this.conversations.has(userId)) {
       this.conversations.set(userId, {
@@ -186,43 +118,32 @@ export class ConversationService implements OnModuleInit {
         messages: [],
         lastActivity: new Date(),
       });
-
-      // Carregar histórico do MongoDB de forma assíncrona
       this.loadUserConversationFromDB(userId);
     }
   }
 
-  /**
-   * Carrega a conversa do usuário do MongoDB para a memória
-   */
   private async loadUserConversationFromDB(userId: string): Promise<void> {
     try {
-      // Buscar apenas as últimas mensagens para economizar memória
-      const conversation = await this.userConversationModel.findOne(
-        { userId },
-        { messages: { $slice: -this.MAX_MESSAGES_TO_LOAD } },
-      );
+      const { data } = await this.supabase
+        .from('user_conversations')
+        .select('messages, last_activity')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      if (conversation) {
+      if (data) {
+        const allMessages: ConversationMessage[] = data.messages ?? [];
         this.conversations.set(userId, {
           userId,
-          messages: conversation.messages || [],
-          lastActivity: conversation.lastActivity || new Date(),
+          messages: allMessages.slice(-this.MAX_MESSAGES_TO_LOAD),
+          lastActivity: new Date(data.last_activity),
         });
-        this.logger.debug(`Conversa de ${userId} carregada do MongoDB`);
+        this.logger.debug(`Conversa de ${userId} carregada do Supabase`);
       }
     } catch (error) {
-      this.logger.error(
-        `Erro ao carregar conversa de ${userId} do MongoDB`,
-        error,
-      );
+      this.logger.error(`Erro ao carregar conversa de ${userId} do Supabase`, error);
     }
   }
 
-  /**
-   * Remove conversas inativas da memória para liberar recursos
-   * Conversas já estão salvas no MongoDB, então podem ser removidas com segurança
-   */
   private cleanupMemoryConversations(): void {
     const now = new Date();
     let removedCount = 0;
@@ -231,7 +152,6 @@ export class ConversationService implements OnModuleInit {
       const minutesInactive =
         (now.getTime() - conversation.lastActivity.getTime()) / (1000 * 60);
 
-      // Se inativo por mais de 30 minutos, remove da memória (já está no MongoDB)
       if (minutesInactive > 30) {
         this.conversations.delete(userId);
         removedCount++;
@@ -239,63 +159,88 @@ export class ConversationService implements OnModuleInit {
     }
 
     if (removedCount > 0) {
-      this.logger.debug(
-        `Removidas ${removedCount} conversas inativas da memória`,
-      );
+      this.logger.debug(`Removidas ${removedCount} conversas inativas da memória`);
     }
   }
 
-  /**
-   * Remove conversas antigas do MongoDB (executa diariamente)
-   */
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async cleanupOldConversations(): Promise<void> {
     try {
       const cutoffDate = new Date();
       cutoffDate.setHours(cutoffDate.getHours() - this.INACTIVITY_LIMIT_HOURS);
 
-      const result = await this.userConversationModel.deleteMany({
-        lastActivity: { $lt: cutoffDate },
-      });
+      const { error } = await this.supabase
+        .from('user_conversations')
+        .delete()
+        .lt('last_activity', cutoffDate.toISOString());
 
-      this.logger.log(
-        `Removidas ${result.deletedCount} conversas antigas do MongoDB`,
-      );
+      if (error) throw error;
+      this.logger.log('Conversas antigas removidas do Supabase');
     } catch (error) {
       this.logger.error('Erro ao limpar conversas antigas', error);
     }
   }
 
-  /**
-   * Busca uma lista de mensagens com status falso enviada para o usuário (recipientPhone)
-   */
-  async getSecretMessagesForUser(
-    recipientPhone: string,
-  ): Promise<SendMessage[]> {
-    return await this.sendMessageModel
-      .find({ recipientPhone, status: false })
-      .sort({ createdAt: -1 })
-      .exec();
+  async getSecretMessagesForUser(recipientPhone: string): Promise<SendMessage[]> {
+    const { data } = await this.supabase
+      .from('send_messages')
+      .select('*')
+      .eq('recipient_phone', recipientPhone)
+      .eq('status', false)
+      .order('created_at', { ascending: false });
+
+    return (data ?? []).map(this.mapSendMessage);
   }
 
-  async getSecretMessageDocForUser(senderPhone: string): Promise<any | null> {
-    return await this.sendMessageModel
-      .findOne({ senderPhone })
-      .sort({ createdAt: -1 });
+  async getSecretMessageDocForUser(senderPhone: string): Promise<SendMessage | null> {
+    const { data } = await this.supabase
+      .from('send_messages')
+      .select('*')
+      .eq('sender_phone', senderPhone)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    return data ? this.mapSendMessage(data) : null;
   }
 
   async updateSecretMessageStatus(recipientPhone: string): Promise<void> {
     try {
-      const result = await this.sendMessageModel.updateMany(
-        { recipientPhone, status: false }, // Filtro
-        { $set: { status: true } }      // Atualização
-      );
+      const { error } = await this.supabase
+        .from('send_messages')
+        .update({ status: true, updated_at: new Date().toISOString() })
+        .eq('recipient_phone', recipientPhone)
+        .eq('status', false);
 
-      this.logger.log(
-        `Atualizado o status de ${result.modifiedCount} mensagens para usuário ${recipientPhone} para verdadeiro`,
-      );
+      if (error) throw error;
+      this.logger.log(`Status das mensagens atualizado para usuário ${recipientPhone}`);
     } catch (error) {
       this.logger.error('Erro ao atualizar o status das mensagens', error);
     }
+  }
+
+  private async upsertConversation(userId: string, messages: ConversationMessage[], lastActivity: Date): Promise<void> {
+    const { error } = await this.supabase
+      .from('user_conversations')
+      .upsert(
+        { user_id: userId, messages, last_activity: lastActivity.toISOString(), updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' },
+      );
+
+    if (error) throw error;
+  }
+
+  private mapSendMessage(row: any): SendMessage {
+    return {
+      id: row.id,
+      senderName: row.sender_name,
+      senderPhone: row.sender_phone,
+      senderMessage: row.sender_message,
+      recipientName: row.recipient_name,
+      recipientPhone: row.recipient_phone,
+      status: row.status,
+      recipientState: row.recipient_state,
+      productType: row.product_type,
+    };
   }
 }

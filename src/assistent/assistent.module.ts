@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { WhatsappService } from './whatsapp/whatsapp.service';
 import { BotStateService } from './whatsapp/bot-state.service';
@@ -17,20 +16,9 @@ import { ClassificationHook } from './pre-hooks/classification.hook';
 import { MessagePipelineService } from './pre-hooks/message-pipeline.service';
 import { MessageDeliveryService } from './services/message-delivery.service';
 import { TunnelService } from './services/tunnel.service';
-import {
-  UserConversationModel,
-  UserConversationSchema,
-} from './conversation/conversation.schema';
-import { SendMessage, SendMessageSchema } from '../schema/send-message.schema';
-import { TunnelSession, TunnelSessionSchema } from '../schema/tunnel-session.schema';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([
-      { name: UserConversationModel.name, schema: UserConversationSchema },
-      { name: SendMessage.name, schema: SendMessageSchema },
-      { name: TunnelSession.name, schema: TunnelSessionSchema },
-    ]),
     ConfigModule,
   ],
   providers: [

@@ -1,6 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
 import { PromptTemplate } from '@langchain/core/prompts';
@@ -8,7 +7,7 @@ import { StringOutputParser } from '@langchain/core/output_parsers';
 import { RunnableSequence } from '@langchain/core/runnables';
 import { IMessageHook, MessageContext, MessageIntent } from './interfaces/message-hook.interface';
 import { MessageDeliveryService } from '../services/message-delivery.service';
-import { SendMessage } from '../../schema/send-message.schema';
+import { SUPABASE_CLIENT } from '../../supabase/supabase.module';
 
 const readMessagePrompt = `Você é um classificador de intenção para um sistema de cartas anônimas.
 O destinatário recebeu uma notificação de que possui uma carta secreta e foi perguntado se deseja lê-la.
@@ -41,8 +40,7 @@ export class ClassificationHook implements IMessageHook {
   constructor(
     private readonly configService: ConfigService,
     private readonly messageDeliveryService: MessageDeliveryService,
-    @InjectModel(SendMessage.name)
-    private readonly sendMessageModel: Model<SendMessage>,
+    @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
   ) {
     const model = new ChatOpenAI({
       modelName: 'gpt-4o-mini-2024-07-18',
@@ -64,18 +62,27 @@ export class ClassificationHook implements IMessageHook {
   }
 
   async handle(ctx: MessageContext, next: () => Promise<void>): Promise<void> {
-    const isSender = await this.sendMessageModel.exists({ senderPhone: ctx.phone });
-    if (isSender) {
+    const { data: senderRow } = await this.supabase
+      .from('send_messages')
+      .select('id')
+      .eq('sender_phone', ctx.phone)
+      .limit(1)
+      .maybeSingle();
+
+    if (senderRow !== null) {
       this.logger.log(`${ctx.phone} identificado como remetente, encaminhando para AiService`);
       return next();
     }
 
-    const record = await this.sendMessageModel
-      .findOne({ recipientPhone: ctx.phone })
-      .sort({ createdAt: -1 })
-      .exec();
+    const { data: record } = await this.supabase
+      .from('send_messages')
+      .select('recipient_state')
+      .eq('recipient_phone', ctx.phone)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    const state = record?.recipientState ?? 'WAITING_READ';
+    const state = record?.recipient_state ?? 'WAITING_READ';
 
     ctx.intent = await this.classify(ctx.text, state);
 

@@ -59,6 +59,35 @@ export class WhatsappService implements OnModuleInit, IMessageSender {
     });
   }
 
+  private getPuppeteerArgs(): string[] {
+    const isWindows = process.platform === 'win32';
+    // PUPPETEER_SINGLE_PROCESS=true força o uso mesmo no Windows (ambientes Linux sem zygote)
+    const forceSingleProcess = process.env.PUPPETEER_SINGLE_PROCESS === 'true';
+    const useSingleProcess = !isWindows || forceSingleProcess;
+
+    this.logger.debug(
+      `Plataforma: ${process.platform} | --single-process: ${useSingleProcess}`,
+    );
+
+    return [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--disable-infobars',
+      '--ignore-certificate-errors',
+      '--ignore-certificate-errors-spki-list',
+      '--disable-renderer-backgrounding',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      useSingleProcess ? '--single-process' : '',
+    ].filter(Boolean);
+  }
+
   private initializeClient(): Client {
     const clientId =
       this.configService.get<string>('WHATSAPP_CLIENT_ID') || 'whatsapp-client';
@@ -72,44 +101,32 @@ export class WhatsappService implements OnModuleInit, IMessageSender {
         backupSyncIntervalMs: 300_000,
         dataPath: this.wwebjsDataPath,
       }),
-      webVersion: '2.3000.1036821440',
-      webVersionCache: {
-        type: 'remote',
-        remotePath:
-          'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}-alpha.html',
-      },
       puppeteer: {
         headless: true,
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--single-process',
-          '--disable-gpu',
-          '--disable-extensions',
-          '--disable-infobars',
-          '--ignore-certificate-errors',
-          '--ignore-certificate-errors-spki-list',
-          '--disable-renderer-backgrounding',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--renderer-process-limit=1',
-          '--js-flags=--max-old-space-size=128',
-        ].filter(Boolean),
+        args: this.getPuppeteerArgs(),
       },
     });
   }
 
   private async initializeWhatsapp(): Promise<void> {
-    try {
-      await this.client.initialize();
-    } catch (error) {
-      this.logger.error('Erro ao inicializar WhatsApp:', error);
-      throw new Error('Falha ao inicializar cliente WhatsApp');
+    const maxAttempts = 3;
+    const retryDelayMs = 5_000;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        this.logger.log(`Inicializando WhatsApp (tentativa ${attempt}/${maxAttempts})...`);
+        await this.client.initialize();
+        return;
+      } catch (error) {
+        this.logger.error(`Erro ao inicializar WhatsApp (tentativa ${attempt}):`, error);
+        if (attempt < maxAttempts) {
+          this.logger.log(`Aguardando ${retryDelayMs / 1000}s antes de tentar novamente...`);
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        } else {
+          throw new Error('Falha ao inicializar cliente WhatsApp após todas as tentativas');
+        }
+      }
     }
   }
 

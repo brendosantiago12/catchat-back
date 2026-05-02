@@ -10,7 +10,19 @@
       "Bash(curl -s \"https://wwebjs.dev/guide/creating-your-bot/authentication.html\")",
       "Read(//tmp/**)",
       "Bash(sed 's/<[^>]*>//g')",
-      "Read(//c/Users/Brendo/.claude/plans/**)"
+      "Read(//c/Users/Brendo/.claude/plans/**)",
+      "Bash(npm run *)",
+      "mcp__claude_ai_Supabase__list_projects",
+      "Bash(Select-String -Path \"c:\\\\Users\\\\Brendo\\\\Projetos\\\\Cupido\\\\CatChat\\\\play-love\\\\.env\" -Pattern \"SUPABASE_URL\")",
+      "mcp__claude_ai_Supabase__list_tables",
+      "mcp__claude_ai_Supabase__apply_migration",
+      "mcp__claude_ai_Supabase__execute_sql",
+      "mcp__claude_ai_Supabase__get_cost",
+      "mcp__claude_ai_Supabase__create_project",
+      "mcp__claude_ai_Supabase__pause_project",
+      "mcp__claude_ai_Supabase__confirm_cost",
+      "mcp__claude_ai_Supabase__get_project_url",
+      "mcp__claude_ai_Supabase__get_publishable_keys"
     ],
     "additionalDirectories": [
       "C:\\Users\\Brendo\\.claude\\plans"

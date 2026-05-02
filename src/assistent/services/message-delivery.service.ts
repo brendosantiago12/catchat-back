@@ -1,19 +1,17 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { IMessageSender, MESSAGE_SENDER } from '../../common/messaging/messaging.interface';
 import { SendMessage } from '../../schema/send-message.schema';
 import { TunnelService } from './tunnel.service';
+import { SUPABASE_CLIENT } from '../../supabase/supabase.module';
 
 @Injectable()
 export class MessageDeliveryService {
   private readonly logger = new Logger(MessageDeliveryService.name);
 
   constructor(
-    @InjectModel(SendMessage.name)
-    private readonly sendMessageModel: Model<SendMessage>,
-    @Inject(MESSAGE_SENDER)
-    private readonly messageSender: IMessageSender,
+    @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
+    @Inject(MESSAGE_SENDER) private readonly messageSender: IMessageSender,
     private readonly tunnelService: TunnelService,
   ) {}
 
@@ -27,10 +25,14 @@ export class MessageDeliveryService {
   }
 
   async sendSecretMessage(phone: string): Promise<void> {
-    const messages = await this.sendMessageModel
-      .find({ recipientPhone: phone, status: false })
-      .sort({ createdAt: 1 })
-      .exec();
+    const { data: rows } = await this.supabase
+      .from('send_messages')
+      .select('*')
+      .eq('recipient_phone', phone)
+      .eq('status', false)
+      .order('created_at', { ascending: true });
+
+    const messages: SendMessage[] = (rows ?? []).map(this.mapRow);
 
     if (messages.length === 0) {
       await this.messageSender.send(
@@ -45,24 +47,25 @@ export class MessageDeliveryService {
 
     await this.messageSender.send(phone, `_Admirer_:\n\n${content}`);
 
-    // Verifica se alguma mensagem permite túnel
     const hasTunnel = messages.some(
       (msg) => msg.productType === 'MESSAGE_TUNNEL' || msg.productType === 'UNLIMITED',
     );
 
     if (hasTunnel) {
-      await this.sendMessageModel.updateMany(
-        { recipientPhone: phone, status: false },
-        { $set: { status: true, recipientState: 'WAITING_TUNNEL' } },
-      );
+      await this.supabase
+        .from('send_messages')
+        .update({ status: true, recipient_state: 'WAITING_TUNNEL', updated_at: new Date().toISOString() })
+        .eq('recipient_phone', phone)
+        .eq('status', false);
 
       this.logger.log(`Carta entregue para ${phone}, aguardando decisão sobre túnel`);
       await this.askTunnel(phone);
     } else {
-      await this.sendMessageModel.updateMany(
-        { recipientPhone: phone, status: false },
-        { $set: { status: true, recipientState: 'DONE' } },
-      );
+      await this.supabase
+        .from('send_messages')
+        .update({ status: true, recipient_state: 'DONE', updated_at: new Date().toISOString() })
+        .eq('recipient_phone', phone)
+        .eq('status', false);
 
       this.logger.log(`Carta entregue para ${phone} (produto sem túnel), encerrando`);
 
@@ -84,20 +87,42 @@ export class MessageDeliveryService {
   }
 
   async openTunnel(recipientPhone: string): Promise<void> {
-    const message = await this.sendMessageModel
-      .findOne({ recipientPhone, status: true, recipientState: 'WAITING_TUNNEL' })
-      .sort({ createdAt: -1 })
-      .exec();
+    const { data } = await this.supabase
+      .from('send_messages')
+      .select('*')
+      .eq('recipient_phone', recipientPhone)
+      .eq('status', true)
+      .eq('recipient_state', 'WAITING_TUNNEL')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (!message) {
+    if (!data) {
       this.logger.warn(`Nenhuma mensagem encontrada para abrir túnel com ${recipientPhone}`);
       return;
     }
 
-    await this.sendMessageModel.findByIdAndUpdate(message._id, {
-      $set: { recipientState: 'TUNNEL_ACTIVE' },
-    });
+    const message = this.mapRow(data);
+
+    await this.supabase
+      .from('send_messages')
+      .update({ recipient_state: 'TUNNEL_ACTIVE', updated_at: new Date().toISOString() })
+      .eq('id', data.id);
 
     await this.tunnelService.open(message.senderPhone, recipientPhone, message.recipientName, message.senderName);
+  }
+
+  private mapRow(row: any): SendMessage {
+    return {
+      id: row.id,
+      senderName: row.sender_name,
+      senderPhone: row.sender_phone,
+      senderMessage: row.sender_message,
+      recipientName: row.recipient_name,
+      recipientPhone: row.recipient_phone,
+      status: row.status,
+      recipientState: row.recipient_state,
+      productType: row.product_type,
+    };
   }
 }

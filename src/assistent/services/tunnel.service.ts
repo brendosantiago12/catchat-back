@@ -1,15 +1,14 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid';
 import { TunnelSession } from '../../schema/tunnel-session.schema';
 import { IMessageSender, MESSAGE_SENDER } from '../../common/messaging/messaging.interface';
 import { generateTag } from '../../common/utils/tag-generator';
+import { SUPABASE_CLIENT } from '../../supabase/supabase.module';
 
 const TUNNEL_DURATION_HOURS = 24;
-const TUNNEL_MESSAGE_LIMIT = 15;
-
-// Tag fixa usada pelo destinatário para identificar o remetente anônimo
+const TUNNEL_MESSAGE_LIMIT = 7;
 const RECIPIENT_SENDER_TAG = 'admirador';
 
 @Injectable()
@@ -17,10 +16,8 @@ export class TunnelService {
   private readonly logger = new Logger(TunnelService.name);
 
   constructor(
-    @InjectModel(TunnelSession.name)
-    private readonly tunnelModel: Model<TunnelSession>,
-    @Inject(MESSAGE_SENDER)
-    private readonly messageSender: IMessageSender,
+    @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
+    @Inject(MESSAGE_SENDER) private readonly messageSender: IMessageSender,
   ) {}
 
   async open(senderPhone: string, recipientPhone: string, recipientName: string, senderName: string): Promise<void> {
@@ -29,15 +26,20 @@ export class TunnelService {
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + TUNNEL_DURATION_HOURS);
 
-    await this.tunnelModel.create({
-      senderPhone,
-      recipientPhone,
-      senderName,
-      status: 'ACTIVE',
-      messagesRemaining: TUNNEL_MESSAGE_LIMIT,
-      expiresAt,
-      tag,
-    });
+    const { error } = await this.supabase
+      .from('tunnel_sessions')
+      .insert({
+        tunnel_id: uuidv4(),
+        sender_phone: senderPhone,
+        recipient_phone: recipientPhone,
+        sender_name: senderName,
+        status: 'ACTIVE',
+        messages_remaining: TUNNEL_MESSAGE_LIMIT,
+        expires_at: expiresAt.toISOString(),
+        tag,
+      });
+
+    if (error) throw new Error(`Erro ao criar tunnel session: ${error.message}`);
 
     this.logger.log(`Túnel aberto entre ${senderPhone} e ${recipientPhone} com tag #${tag}`);
 
@@ -58,47 +60,59 @@ export class TunnelService {
   }
 
   async findActiveSession(phone: string): Promise<TunnelSession | null> {
-    const now = new Date();
-    return this.tunnelModel.findOne({
-      $or: [{ senderPhone: phone }, { recipientPhone: phone }],
-      status: 'ACTIVE',
-      expiresAt: { $gt: now },
-    }).exec();
+    const now = new Date().toISOString();
+    const { data } = await this.supabase
+      .from('tunnel_sessions')
+      .select('*')
+      .or(`sender_phone.eq.${phone},recipient_phone.eq.${phone}`)
+      .eq('status', 'ACTIVE')
+      .gt('expires_at', now)
+      .limit(1)
+      .maybeSingle();
+
+    return data ? this.mapRow(data) : null;
   }
 
   async findSessionByTag(phone: string, tag: string): Promise<TunnelSession | null> {
-    const now = new Date();
+    const now = new Date().toISOString();
     const normalizedTag = tag.toLowerCase();
 
-    // Tenta como remetente (o remetente usa a tag do destinatário)
-    const asSender = await this.tunnelModel.findOne({
-      senderPhone: phone,
-      tag: normalizedTag,
-      status: 'ACTIVE',
-      expiresAt: { $gt: now },
-    }).exec();
+    const { data: asSender } = await this.supabase
+      .from('tunnel_sessions')
+      .select('*')
+      .eq('sender_phone', phone)
+      .eq('tag', normalizedTag)
+      .eq('status', 'ACTIVE')
+      .gt('expires_at', now)
+      .maybeSingle();
 
-    if (asSender) return asSender;
+    if (asSender) return this.mapRow(asSender);
 
-    // Tenta como destinatário (o destinatário usa a tag fixa "admirador")
     if (normalizedTag === RECIPIENT_SENDER_TAG) {
-      return this.tunnelModel.findOne({
-        recipientPhone: phone,
-        status: 'ACTIVE',
-        expiresAt: { $gt: now },
-      }).exec();
+      const { data } = await this.supabase
+        .from('tunnel_sessions')
+        .select('*')
+        .eq('recipient_phone', phone)
+        .eq('status', 'ACTIVE')
+        .gt('expires_at', now)
+        .maybeSingle();
+
+      return data ? this.mapRow(data) : null;
     }
 
     return null;
   }
 
   async findAllActiveSessions(phone: string): Promise<TunnelSession[]> {
-    const now = new Date();
-    return this.tunnelModel.find({
-      $or: [{ senderPhone: phone }, { recipientPhone: phone }],
-      status: 'ACTIVE',
-      expiresAt: { $gt: now },
-    }).exec();
+    const now = new Date().toISOString();
+    const { data } = await this.supabase
+      .from('tunnel_sessions')
+      .select('*')
+      .or(`sender_phone.eq.${phone},recipient_phone.eq.${phone}`)
+      .eq('status', 'ACTIVE')
+      .gt('expires_at', now);
+
+    return (data ?? []).map(this.mapRow);
   }
 
   async relay(session: TunnelSession, fromPhone: string, message: string): Promise<void> {
@@ -114,10 +128,14 @@ export class TunnelService {
   private async relaySenderMessage(session: TunnelSession, message: string): Promise<void> {
     const remaining = session.messagesRemaining - 1;
 
-    await this.tunnelModel.findByIdAndUpdate(session._id, {
-      messagesRemaining: remaining,
-      ...(remaining === 0 && { status: 'DONE' }),
-    });
+    await this.supabase
+      .from('tunnel_sessions')
+      .update({
+        messages_remaining: remaining,
+        ...(remaining === 0 && { status: 'DONE' }),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', session.id);
 
     if (remaining > 0) {
       await this.messageSender.send(
@@ -171,19 +189,23 @@ export class TunnelService {
 
   @Cron('0 * * * *')
   async expireActiveSessions(): Promise<void> {
-    const now = new Date();
-    const expired = await this.tunnelModel.find({
-      status: 'ACTIVE',
-      expiresAt: { $lte: now },
-    }).exec();
+    const now = new Date().toISOString();
+    const { data: expired } = await this.supabase
+      .from('tunnel_sessions')
+      .select('*')
+      .eq('status', 'ACTIVE')
+      .lte('expires_at', now);
 
-    for (const session of expired) {
-      await this.expireSession(session);
+    for (const row of expired ?? []) {
+      await this.expireSession(this.mapRow(row));
     }
   }
 
   async expireSession(session: TunnelSession): Promise<void> {
-    await this.tunnelModel.findByIdAndUpdate(session._id, { status: 'DONE' });
+    await this.supabase
+      .from('tunnel_sessions')
+      .update({ status: 'DONE', updated_at: new Date().toISOString() })
+      .eq('id', session.id);
 
     const expiredMessage =
       `⏰ O túnel expirou após ${TUNNEL_DURATION_HOURS}h de inatividade.\n\n` +
@@ -194,12 +216,27 @@ export class TunnelService {
   }
 
   private async generateUniqueTag(senderPhone: string, recipientName: string): Promise<string> {
-    const existingSessions = await this.tunnelModel.find({
-      senderPhone,
-      status: 'ACTIVE',
-    }).select('tag').exec();
+    const { data } = await this.supabase
+      .from('tunnel_sessions')
+      .select('tag')
+      .eq('sender_phone', senderPhone)
+      .eq('status', 'ACTIVE');
 
-    const existingTags = existingSessions.map((s) => s.tag);
+    const existingTags = (data ?? []).map((s: any) => s.tag);
     return generateTag(recipientName, existingTags);
+  }
+
+  private mapRow(row: any): TunnelSession {
+    return {
+      id: row.id,
+      tunnel_id: row.tunnel_id,
+      senderPhone: row.sender_phone,
+      recipientPhone: row.recipient_phone,
+      senderName: row.sender_name,
+      status: row.status,
+      messagesRemaining: row.messages_remaining,
+      expiresAt: row.expires_at,
+      tag: row.tag,
+    };
   }
 }

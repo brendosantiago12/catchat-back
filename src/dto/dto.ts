@@ -118,3 +118,43 @@ export class HomePhoneDto {
   @ApiProperty({ description: 'Código de área (DDD)', example: '81' })
   area: string;
 }
+
+export class SubscriptionStatusResponseDto {
+  @ApiProperty({ description: 'Indica se o usuário possui assinatura ativa', example: true })
+  hasSubscription: boolean;
+
+  @ApiProperty({ description: 'Data de expiração da assinatura (ISO 8601)', example: '2026-06-01T12:00:00.000Z', nullable: true })
+  expiresAt: string | null;
+
+  @ApiProperty({ description: 'Dias restantes na assinatura', example: 28, nullable: true })
+  daysRemaining: number | null;
+}
+
+export class RequestOtpDto {
+  @ApiProperty({ description: 'Celular do remetente (com DDI e DDD)', example: '5581999887766' })
+  @IsString()
+  @IsNotEmpty()
+  celular: string;
+
+  @ApiProperty({ description: 'CPF do remetente (somente números)', example: '12345678901' })
+  @IsString()
+  @IsNotEmpty()
+  taxId: string;
+}
+
+export class VerifyOtpDto {
+  @ApiProperty({ description: 'Celular do remetente (com DDI e DDD)', example: '5581999887766' })
+  @IsString()
+  @IsNotEmpty()
+  celular: string;
+
+  @ApiProperty({ description: 'CPF do remetente (somente números)', example: '12345678901' })
+  @IsString()
+  @IsNotEmpty()
+  taxId: string;
+
+  @ApiProperty({ description: 'Código OTP de 6 dígitos recebido via WhatsApp', example: '123456' })
+  @IsString()
+  @IsNotEmpty()
+  code: string;
+}
